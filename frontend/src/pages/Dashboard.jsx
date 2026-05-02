@@ -15,58 +15,39 @@ function Dashboard() {
 
   const [files, setFiles] = useState([]);
   const [loadingFiles, setLoadingFiles] = useState(true);
+  const [deletingKey, setDeletingKey] = useState(null);
+  const [downloadingKey, setDownloadingKey] = useState(null);
 
   useEffect(() => {
     loadUser();
     loadFiles();
   }, []);
 
-  // =========================
-  // SAFE AUTH FIX
-  // =========================
   const loadUser = async () => {
     try {
       const session = await fetchAuthSession();
-
-      console.log("SESSION DEBUG:", session);
-
       const idToken = session?.tokens?.idToken;
-
       if (!idToken || !idToken.payload) {
-        console.log("No valid session");
         setEmail("Guest");
         return;
       }
-
-      const email = idToken.payload.email;
-
-      setEmail(email || "User");
+      setEmail(idToken.payload.email || "User");
     } catch (error) {
       console.error("AUTH ERROR:", error);
       setEmail("Guest");
     }
   };
 
-  // =========================
-  // SAFE FILES LOAD
-  // =========================
   const loadFiles = async () => {
     try {
       setLoadingFiles(true);
-
       const response = await fetch(`${API_URL}/files`);
       const data = await response.json();
-
-      console.log("FILES RESPONSE:", data);
-
-      // SAFE normalization
-      const normalized =
-        Array.isArray(data)
-          ? data
-          : data?.files
-          ? data.files
-          : [];
-
+      const normalized = Array.isArray(data)
+        ? data
+        : data?.files
+        ? data.files
+        : [];
       setFiles(normalized);
     } catch (error) {
       console.error("FILES ERROR:", error);
@@ -76,9 +57,6 @@ function Dashboard() {
     }
   };
 
-  // =========================
-  // LOGOUT
-  // =========================
   const handleLogout = async () => {
     try {
       await signOut();
@@ -88,56 +66,36 @@ function Dashboard() {
     }
   };
 
-  // =========================
-  // FILE SELECT
-  // =========================
   const handleFileChange = (e) => {
     setSelectedFile(e.target.files[0]);
     setUploadMessage("");
   };
 
-  // =========================
-  // FIXED UPLOAD (STRICT VERSION)
-  // =========================
   const handleUpload = async () => {
     if (!selectedFile) {
       setUploadMessage("Please choose a file.");
       return;
     }
-
     try {
       setIsUploading(true);
       setUploadMessage("Getting upload URL...");
 
       const response = await fetch(`${API_URL}/upload-url`, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           filename: selectedFile.name,
           filetype: selectedFile.type,
         }),
       });
 
-      if (!response.ok) {
-        throw new Error("Failed to get upload URL");
-      }
+      if (!response.ok) throw new Error("Failed to get upload URL");
 
       const raw = await response.json();
-      console.log("UPLOAD RAW RESPONSE:", raw);
-
-      // SAFE parsing (STRICT)
-      const data =
-        typeof raw.body === "string"
-          ? JSON.parse(raw.body)
-          : raw;
-
+      const data = typeof raw.body === "string" ? JSON.parse(raw.body) : raw;
       const uploadUrl = data?.uploadUrl;
 
-      if (!uploadUrl) {
-        throw new Error("Backend did not return uploadUrl");
-      }
+      if (!uploadUrl) throw new Error("Backend did not return uploadUrl");
 
       setUploadMessage("Uploading...");
 
@@ -146,18 +104,13 @@ function Dashboard() {
         body: selectedFile,
       });
 
-      if (!uploadResult.ok) {
-        throw new Error("S3 upload failed");
-      }
+      if (!uploadResult.ok) throw new Error("S3 upload failed");
 
       setUploadMessage("✅ Upload successful!");
       setSelectedFile(null);
-
       const input = document.querySelector('input[type="file"]');
       if (input) input.value = "";
-
       await loadFiles();
-
     } catch (error) {
       console.error("UPLOAD ERROR:", error);
       setUploadMessage(`❌ ${error.message}`);
@@ -167,32 +120,80 @@ function Dashboard() {
   };
 
   // =========================
-  // FORMAT SIZE
+  // DOWNLOAD
   // =========================
-  const formatSize = (bytes) => {
-    if (!bytes) return "0 KB";
+  const handleDownload = async (fileKey) => {
+    try {
+      setDownloadingKey(fileKey);
 
-    const kb = bytes / 1024;
-    if (kb < 1024) return `${kb.toFixed(1)} KB`;
+      const response = await fetch(`${API_URL}/download-url`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ key: fileKey }),
+      });
 
-    return `${(kb / 1024).toFixed(2)} MB`;
+      if (!response.ok) throw new Error("Failed to get download URL");
+
+      const raw = await response.json();
+      const data = typeof raw.body === "string" ? JSON.parse(raw.body) : raw;
+      const downloadUrl = data?.downloadUrl;
+
+      if (!downloadUrl) throw new Error("No download URL returned");
+
+      // Open in new tab — browser will download automatically
+      window.open(downloadUrl, "_blank");
+    } catch (error) {
+      console.error("DOWNLOAD ERROR:", error);
+      alert(`Download failed: ${error.message}`);
+    } finally {
+      setDownloadingKey(null);
+    }
   };
 
   // =========================
-  // UI
+  // DELETE
   // =========================
+  const handleDelete = async (fileKey) => {
+    if (!window.confirm(`Delete "${fileKey.replace("uploads/", "")}"?`)) return;
+
+    try {
+      setDeletingKey(fileKey);
+
+      const response = await fetch(`${API_URL}/delete`, {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ key: fileKey }),
+      });
+
+      if (!response.ok) throw new Error("Delete failed");
+
+      // Remove from local state immediately (no need to reload)
+      setFiles((prev) => prev.filter((f) => f.key !== fileKey));
+    } catch (error) {
+      console.error("DELETE ERROR:", error);
+      alert(`Delete failed: ${error.message}`);
+    } finally {
+      setDeletingKey(null);
+    }
+  };
+
+  const formatSize = (bytes) => {
+    if (!bytes) return "0 KB";
+    const kb = bytes / 1024;
+    if (kb < 1024) return `${kb.toFixed(1)} KB`;
+    return `${(kb / 1024).toFixed(2)} MB`;
+  };
+
   return (
     <div className="dashboard">
       <aside className="sidebar">
         <h2>🔐 SecureVault</h2>
-
         <nav>
           <Link to="/dashboard">Dashboard</Link>
           <Link to="/dashboard">My Files</Link>
           <Link to="/dashboard">Upload</Link>
           <Link to="/dashboard">Settings</Link>
         </nav>
-
         <button
           onClick={handleLogout}
           style={{
@@ -221,11 +222,8 @@ function Dashboard() {
           marginBottom: "25px",
         }}>
           <h3>Upload File</h3>
-
           <input type="file" onChange={handleFileChange} />
-
           {selectedFile && <p>📄 {selectedFile.name}</p>}
-
           <button
             onClick={handleUpload}
             disabled={isUploading}
@@ -240,7 +238,6 @@ function Dashboard() {
           >
             {isUploading ? "Uploading..." : "Upload"}
           </button>
-
           <p>{uploadMessage}</p>
         </section>
 
@@ -257,21 +254,60 @@ function Dashboard() {
             <p>No files uploaded yet.</p>
           ) : (
             files.map((file, index) => (
-              <div key={index} style={{
-                padding: "12px",
-                borderBottom: "1px solid #eee",
-              }}>
-                <strong>
-                  {file.key?.replace("uploads/", "")}
-                </strong>
+              <div
+                key={index}
+                style={{
+                  padding: "12px",
+                  borderBottom: "1px solid #eee",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  gap: "12px",
+                }}
+              >
+                <div>
+                  <strong>{file.key?.replace("uploads/", "")}</strong>
+                  <p style={{ margin: "2px 0", fontSize: "13px", color: "#666" }}>
+                    {formatSize(file.size)} &nbsp;·&nbsp;
+                    {file.lastModified
+                      ? new Date(file.lastModified).toLocaleString()
+                      : ""}
+                  </p>
+                </div>
 
-                <p>{formatSize(file.size)}</p>
+                <div style={{ display: "flex", gap: "8px", flexShrink: 0 }}>
+                  <button
+                    onClick={() => handleDownload(file.key)}
+                    disabled={downloadingKey === file.key}
+                    style={{
+                      padding: "6px 14px",
+                      background: "#2563eb",
+                      color: "white",
+                      border: "none",
+                      borderRadius: "6px",
+                      cursor: "pointer",
+                      fontSize: "13px",
+                    }}
+                  >
+                    {downloadingKey === file.key ? "..." : "⬇ Download"}
+                  </button>
 
-                <p>
-                  {file.lastModified
-                    ? new Date(file.lastModified).toLocaleString()
-                    : ""}
-                </p>
+                  <button
+                    onClick={() => handleDelete(file.key)}
+                    disabled={deletingKey === file.key}
+                    style={{
+                      padding: "6px 14px",
+                      background: "#dc2626",
+                      color: "white",
+                      border: "none",
+                      borderRadius: "6px",
+                      cursor: "pointer",
+                      fontSize: "13px",
+                    }}
+                  >
+                    {deletingKey === file.key ? "..." : "🗑 Delete"}
+                  </button>
+                </div>
               </div>
             ))
           )}
