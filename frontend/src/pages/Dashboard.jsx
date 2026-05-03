@@ -38,6 +38,7 @@ export default function Dashboard() {
   // User
   const [email, setEmail] = useState("");
   const [userId, setUserId] = useState(null);
+  const [idToken, setIdToken] = useState("");
 
   // Files
   const [files, setFiles] = useState([]);
@@ -58,7 +59,7 @@ export default function Dashboard() {
 
   // ── Boot ────────────────────────────────────────────────────
   useEffect(() => { loadUser(); }, []);
-  useEffect(() => { if (userId) loadFiles(); }, [userId]);
+  useEffect(() => { if (userId && idToken) loadFiles(); }, [userId, idToken]);
 
   const loadUser = async () => {
     try {
@@ -67,6 +68,7 @@ export default function Dashboard() {
       if (!token?.payload) { navigate("/"); return; }
       setEmail(token.payload.email || "User");
       setUserId(token.payload.sub);   // unique Cognito user ID
+      setIdToken(token.toString());
     } catch { navigate("/"); }
   };
 
@@ -74,8 +76,9 @@ export default function Dashboard() {
   const loadFiles = async () => {
     try {
       setLoadingFiles(true);
-      // Pass userId so Lambda lists only THIS user's folder
-      const res = await fetch(`${API}/files?userId=${userId}`);
+      const res = await fetch(`${API}/files`, {
+        headers: { Authorization: `Bearer ${idToken}` },
+      });
       if (!res.ok) throw new Error("Failed to load files");
       const raw = await res.json();
       const list = Array.isArray(raw) ? raw : raw?.files ?? [];
@@ -119,11 +122,13 @@ export default function Dashboard() {
 
       const res = await fetch(`${API}/upload-url`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${idToken}`,
+        },
         body: JSON.stringify({
           filename: picked.name,
           filetype: picked.type || "application/octet-stream",
-          userId,          // Lambda stores under uploads/{userId}/filename
         }),
       });
       if (!res.ok) throw new Error("Failed to get upload URL");
@@ -165,7 +170,10 @@ export default function Dashboard() {
       setDownloadingKey(key);
       const res = await fetch(`${API}/download-url`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${idToken}`,
+        },
         body: JSON.stringify({ key }),
       });
       if (!res.ok) throw new Error("Failed to get download URL");
@@ -194,7 +202,10 @@ export default function Dashboard() {
       setDeletingKey(key);
       const res = await fetch(`${API}/delete`, {
         method: "DELETE",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${idToken}`,
+        },
         body: JSON.stringify({ key }),
       });
       if (!res.ok) throw new Error("Delete failed");
